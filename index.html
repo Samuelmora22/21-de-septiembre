@@ -3,7 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Flores amarillas</title>
+<title>Feliz día de las flores amarillas</title>
+<meta name="description" content="21 de septiembre">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://21-de-septiembre-one.vercel.app/">
+<meta property="og:title" content="Feliz día de las flores amarillas">
+<meta property="og:description" content="21 de septiembre">
+<meta property="og:image" content="https://21-de-septiembre-one.vercel.app/og.jpg">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="es_MX">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://21-de-septiembre-one.vercel.app/og.jpg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@1,500;1,600&display=swap" rel="stylesheet">
@@ -258,7 +270,7 @@ const P_BAR = new Path2D('M45,135 a30,30 0 0 1 30,-30 h930 a30,30 0 0 1 30,30 v4
 const P_TERM = new Path2D('M93,935 H987 A18,18 0 0 1 1005,953 V1202 A18,18 0 0 1 987,1220 H93 A18,18 0 0 1 75,1202 V953 A18,18 0 0 1 93,935 Z');
 
 function drawEditor(t, wipeY) {
-  const S = Math.min(CW/1080, CH/1350);
+  const S = Math.max(CW/1080, CH/1350);
   const tx = (CW - 1080*S)/2, ty = (CH - 1350*S)/2 + wipeY;
   // background
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -363,7 +375,7 @@ function drawBow(k) {
 const STAR = new Path2D('M0,-1 Q0,0 1,0 Q0,0 0,1 Q0,0 -1,0 Q0,0 0,-1 Z');
 
 function drawBouquet(tb, clock) {
-  const S = Math.min(CW/VW, CH/VH);
+  const S = Math.max(CW/VW, CH/VH);
   const tx = (CW - VW*S)/2 - VX*S, ty = (CH - VH*S)/2 - VY*S;
   ctx.setTransform(DPR*S, 0, 0, DPR*S, DPR*tx, DPR*ty);
   const ramp = clamp((tb - 3.4)/1.5);
@@ -487,11 +499,12 @@ function resize() {
 let rzT = null;
 function onResize() { clearTimeout(rzT); rzT = setTimeout(resize, 120); }
 
-/* tap: skip the code intro, or replay the bloom */
+/* tap: only allow skipping the intro; once the bouquet is blooming, taps do nothing */
 document.addEventListener('pointerdown', () => {
   const now = performance.now(), cur = (now - (startMs === null ? now : startMs))/1000 + offset;
-  const target = cur < T_TRANS ? T_TRANS : TB0;
-  offset = target - (now - (startMs === null ? now : startMs))/1000;
+  if (cur < T_TRANS) {
+    offset = T_TRANS - (now - (startMs === null ? now : startMs))/1000;
+  }
 });
 
 readTheme(); resize();
