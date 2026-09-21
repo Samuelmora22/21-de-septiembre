@@ -270,7 +270,7 @@ const P_BAR = new Path2D('M45,135 a30,30 0 0 1 30,-30 h930 a30,30 0 0 1 30,30 v4
 const P_TERM = new Path2D('M93,935 H987 A18,18 0 0 1 1005,953 V1202 A18,18 0 0 1 987,1220 H93 A18,18 0 0 1 75,1202 V953 A18,18 0 0 1 93,935 Z');
 
 function drawEditor(t, wipeY) {
-  const S = Math.max(CW/1080, CH/1350);
+  const S = Math.min(CW/1080, CH/1350);
   const tx = (CW - 1080*S)/2, ty = (CH - 1350*S)/2 + wipeY;
   // background
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -375,7 +375,7 @@ function drawBow(k) {
 const STAR = new Path2D('M0,-1 Q0,0 1,0 Q0,0 0,1 Q0,0 -1,0 Q0,0 0,-1 Z');
 
 function drawBouquet(tb, clock) {
-  const S = Math.max(CW/VW, CH/VH);
+  const S = Math.min(CW/VW, CH/VH);
   const tx = (CW - VW*S)/2 - VX*S, ty = (CH - VH*S)/2 - VY*S;
   ctx.setTransform(DPR*S, 0, 0, DPR*S, DPR*tx, DPR*ty);
   const ramp = clamp((tb - 3.4)/1.5);
@@ -426,7 +426,7 @@ function drawBouquet(tb, clock) {
 
   // finale: falling petals + sparkles (over the whole visible area)
   const fin = tb - 4.4;
-  if (fin > 0) {
+  if (fin > 0 && !screenshotMode) {
     const fa = clamp(fin/1.0);
     const xmin = -tx/S, xmax = (CW - tx)/S, ymin = -ty/S, ymax = (CH - ty)/S;
     const span = (ymax - ymin) + 160;
@@ -445,7 +445,7 @@ function drawBouquet(tb, clock) {
       ctx.globalAlpha = .55 + .4*tw; ctx.fillStyle = T.spark; ctx.fill(STAR); ctx.restore();
     }
   }
-  drawCaption(tb);
+  if (!screenshotMode) drawCaption(tb);
 }
 
 const CAP = ['Feliz día de las', 'flores amarillas'], CAP_Y = [1252, 1322];
@@ -472,6 +472,7 @@ function drawCaption(tb) {
 
 /* ---------------------------------------------------------- main loop */
 let startMs = null, offset = 0, frames = 0;
+let screenshotMode = false, paused = false, pausedClock = 0;
 function render(clock) {
   if (frames++ % 45 === 0) readTheme();
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height);
@@ -484,7 +485,8 @@ function render(clock) {
 }
 function frame(now) {
   if (startMs === null) startMs = now;
-  render((now - startMs)/1000 + offset);
+  const clock = paused ? pausedClock : (now - startMs)/1000 + offset;
+  render(clock);
   requestAnimationFrame(frame);
 }
 function resize() {
@@ -499,10 +501,36 @@ function resize() {
 let rzT = null;
 function onResize() { clearTimeout(rzT); rzT = setTimeout(resize, 120); }
 
-/* tap: only allow skipping the intro; once the bouquet is blooming, taps do nothing */
-document.addEventListener('pointerdown', () => {
-  const now = performance.now(), cur = (now - (startMs === null ? now : startMs))/1000 + offset;
-  if (cur < T_TRANS) {
+/* toque corto: solo salta la intro de código (nunca reinicia el ramo).
+   mantener presionado ~0.6s: activa/desactiva "modo captura" — congela la
+   animación y oculta el texto y los pétalos/destellos flotantes, para que
+   solo se vea el ramo limpio al tomar una captura de pantalla. */
+let holdTimer = null, holdFired = false, downX = 0, downY = 0;
+function toggleScreenshotMode() {
+  const now = performance.now();
+  if (!paused) {
+    pausedClock = (now - (startMs === null ? now : startMs))/1000 + offset;
+    paused = true;
+  } else {
+    offset = pausedClock - (now - (startMs === null ? now : startMs))/1000;
+    paused = false;
+  }
+  screenshotMode = !screenshotMode;
+}
+document.addEventListener('pointerdown', e => {
+  downX = e.clientX; downY = e.clientY; holdFired = false;
+  holdTimer = setTimeout(() => { holdFired = true; toggleScreenshotMode(); }, 600);
+});
+document.addEventListener('pointermove', e => {
+  if (holdTimer && (Math.abs(e.clientX - downX) > 10 || Math.abs(e.clientY - downY) > 10)) {
+    clearTimeout(holdTimer); holdTimer = null;
+  }
+});
+document.addEventListener('pointerup', () => {
+  clearTimeout(holdTimer);
+  if (holdFired) return;
+  const now = performance.now(), cur = paused ? pausedClock : (now - (startMs === null ? now : startMs))/1000 + offset;
+  if (cur < T_TRANS && !paused) {
     offset = T_TRANS - (now - (startMs === null ? now : startMs))/1000;
   }
 });
