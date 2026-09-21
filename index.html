@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Flores amarillas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@1,500;1,600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg1: #FFF7DC; --bg2: #FFEFB8; --bg3: #F9DF8A;
+    --glow: rgba(255,255,255,.75);
+    --cap: #6B4E00;
+    --shadow: rgba(138,106,30,.18);
+    --spark: #F2B705;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg1: #2B2210; --bg2: #1D1709; --bg3: #100C04;
+      --glow: rgba(255,205,60,.12);
+      --cap: #FFE8A0;
+      --shadow: rgba(0,0,0,.35);
+      --spark: #FFF3C0;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg1: #2B2210; --bg2: #1D1709; --bg3: #100C04;
+    --glow: rgba(255,205,60,.12);
+    --cap: #FFE8A0;
+    --shadow: rgba(0,0,0,.35);
+    --spark: #FFF3C0;
+  }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); height: 100%;
+         background: var(--bg2); }
+  html, body { height: 100%; margin: 0; overflow: hidden; }
+  body {
+    position: relative;
+    background:
+      radial-gradient(ellipse at 50% 38%, var(--glow), transparent 60%),
+      linear-gradient(to bottom, var(--bg1), var(--bg2) 55%, var(--bg3));
+    background-color: var(--bg2);
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    -webkit-user-select: none; user-select: none;
+  }
+  #stage { position: absolute; inset: 0; }
+  canvas { display: block; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+</head>
+<body>
+<h1 class="sr">Feliz día de las flores amarillas</h1>
+<div id="stage"><canvas id="c"></canvas></div>
+
+<script>
+(() => {
+"use strict";
+const stage = document.getElementById('c').parentNode;
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const PI = Math.PI;
+
+/* ---------------------------------------------------------- helpers */
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const e_out = x => 1 - Math.pow(1 - clamp(x), 3);
+const e_io  = x => { x = clamp(x); return 3*x*x - 2*x*x*x; };
+const e_back = x => { x = clamp(x); const c1 = 1.70158, c3 = c1 + 1; return 1 + c3*Math.pow(x-1, 3) + c1*Math.pow(x-1, 2); };
+const lerp = (a, b, t) => a + (b - a)*t;
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+const rnd = mulberry32(21);
+
+const petalCache = {}, leafCache = {};
+function petal(L, w) {
+  const k = L.toFixed(1) + '|' + w.toFixed(1);
+  return petalCache[k] || (petalCache[k] = new Path2D(
+    `M0,0 C${w*.62},${-L*.22} ${w*.55},${-L*.88} 0,${-L} C${-w*.55},${-L*.88} ${-w*.62},${-L*.22} 0,0 Z`));
+}
+function leafPath(L, w) {
+  const k = L + '|' + w;
+  return leafCache[k] || (leafCache[k] = new Path2D(
+    `M0,0 C${w},${-L*.3} ${w*.8},${-L*.75} 0,${-L} C${-w*.8},${-L*.75} ${-w},${-L*.3} 0,0 Z`));
+}
+
+/* ---------------------------------------------------------- theme tokens (read from CSS) */
+const T = { cap: '#6B4E00', shadow: 'rgba(138,106,30,.18)', spark: '#F2B705' };
+function readTheme() {
+  const cs = getComputedStyle(document.documentElement);
+  T.cap = cs.getPropertyValue('--cap').trim() || T.cap;
+  T.shadow = cs.getPropertyValue('--shadow').trim() || T.shadow;
+  T.spark = cs.getPropertyValue('--spark').trim() || T.spark;
+}
+
+/* ---------------------------------------------------------- bouquet data */
+const GX = 540, GY = 985;
+const FL = [
+  ['d', 540, 300, 88, 8, 0],
+  ['s', 375, 375, 105, 15, 0], ['s', 705, 375, 105, -10, 0],
+  ['d', 250, 480, 92, -12, 1], ['d', 830, 480, 92, 20, 1],
+  ['s', 540, 470, 138, 0, 0],
+  ['d', 385, 590, 92, 25, 2], ['d', 695, 590, 92, -18, 2],
+  ['s', 268, 640, 82, -20, 0], ['s', 812, 640, 82, 12, 0],
+  ['d', 450, 705, 76, 5, 1], ['d', 630, 705, 76, -8, 0],
+];
+const ORDER = [5, 1, 2, 0, 3, 4, 6, 7, 8, 9, 10, 11];
+const START = {}; ORDER.forEach((idx, k) => START[idx] = 0.14*k);
+
+const BACK = [[470,70,-8],[470,70,10],[520,80,-28],[520,80,30],[470,66,-50],[470,66,52],[400,60,-68],[400,60,70]];
+const BACK_COL = BACK.map(() => ['#6B9A45', '#5E8C3A', '#78A650'][Math.floor(rnd()*3)]);
+const TUCKS = [[330,470,130,38,-70],[750,470,130,38,70],[450,560,110,32,-35],[630,560,110,32,35],[540,600,120,34,0],[350,700,100,30,-60],[730,700,100,30,60]];
+const MIM = [[170,405,14,46],[910,410,14,46],[455,195,12,40],[640,200,12,40],[150,590,12,40],[930,595,12,40],[330,250,10,34],[760,255,10,34],[205,720,10,34],[880,725,10,34]];
+const MIM_BALLS = MIM.map(([cx, cy, n, sp]) => {
+  const balls = [];
+  for (let i = 0; i < n; i++) {
+    const a = rnd()*2*PI, d = sp*Math.sqrt(rnd());
+    balls.push({ x: d*Math.cos(a), y: d*Math.sin(a)*0.8, r: 9 + 6*rnd(),
+                 col: ['#FFD400', '#FFDC2E', '#FFCB05', '#FFE55C'][Math.floor(rnd()*4)] });
+  }
+  return balls;
+});
+const STEMS = FL.map(([k, x, y]) => {
+  const cxm = (x + GX)/2 + (x - GX)*0.05, cym = (y + GY)/2 + 10, gx = GX + (x - GX)*0.08;
+  return { p0: [gx, GY], p1: [cxm, cym], p2: [x, y] };
+});
+const PET = [];
+for (let i = 0; i < 18; i++) PET.push({ u: 0.03 + 0.94*rnd(), v0: rnd(), v: 70 + 60*rnd(), sc: 0.5 + 0.5*rnd(),
+                                        rs: -90 + 180*rnd(), dr: 40 + 80*rnd(), ph: 6.28*rnd() });
+const SPK = [[215,300,30,0],[870,250,38,1.3],[110,560,24,2.1],[975,560,28,.7],[330,150,26,1.9],[760,130,30,2.8],[200,860,22,.4],[900,880,24,1.6]];
+
+/* ---------------------------------------------------------- sprites (pre-rendered for smooth animation) */
+let DPR = 1, CW = 0, CH = 0, SPR = 1;
+let flowerSprites = [], mimSprites = [];
+
+function makeSprite(R, draw) {
+  const s = Math.max(8, Math.ceil(2*R*SPR));
+  const c = document.createElement('canvas'); c.width = c.height = s;
+  const g = c.getContext('2d');
+  g.translate(s/2, s/2); g.scale(SPR, SPR);
+  draw(g);
+  return { c, u: s/SPR };
+}
+
+function drawSunflower(g, r) {
+  const n = 20;
+  const layers = [[r, r*.36, '#F5B800', 0, '#D99A00'], [r*.92, r*.34, '#FFCE1F', 360/n/2, '#EBA800'], [r*.8, r*.3, '#FFDD4A', 0, '#F0B400']];
+  for (const [L, w, col, off, dark] of layers) {
+    const p = petal(L, w);
+    for (let i = 0; i < n; i++) {
+      g.save(); g.rotate((i*360/n + off)*PI/180);
+      g.fillStyle = col; g.fill(p);
+      g.globalAlpha = .55; g.strokeStyle = dark; g.lineWidth = 1.5; g.stroke(p);
+      g.restore();
+    }
+  }
+  const cr = r*.44;
+  const gr = g.createRadialGradient(0, -cr*.1, 0, 0, -cr*.1, cr*1.2);
+  gr.addColorStop(0, '#7A4A1E'); gr.addColorStop(.7, '#4E2C10'); gr.addColorStop(1, '#3A1F0B');
+  g.fillStyle = gr; g.beginPath(); g.arc(0, 0, cr, 0, 2*PI); g.fill();
+  const golden = PI*(3 - Math.sqrt(5));
+  for (let k = 1; k < 95; k++) {
+    const rr = cr*.93*Math.sqrt(k/95), a = k*golden;
+    g.globalAlpha = .75; g.fillStyle = (k % 3) ? '#A9722F' : '#2A1507';
+    g.beginPath(); g.arc(rr*Math.cos(a), rr*Math.sin(a), cr*.045, 0, 2*PI); g.fill();
+  }
+  g.globalAlpha = .5; g.strokeStyle = '#8A5A22'; g.lineWidth = 3;
+  g.beginPath(); g.arc(0, 0, cr, 0, 2*PI); g.stroke(); g.globalAlpha = 1;
+}
+function drawDaisy(g, r, tone) {
+  const cols = [['#FFE24D', '#F2B800'], ['#FFD62E', '#E8A800'], ['#FFEB7A', '#F5C400']][tone % 3];
+  const n = 16, p1 = petal(r, r*.26), p2 = petal(r*.72, r*.22);
+  for (let i = 0; i < n; i++) {
+    g.save(); g.rotate(i*2*PI/n);
+    g.fillStyle = cols[0]; g.fill(p1);
+    g.globalAlpha = .6; g.strokeStyle = cols[1]; g.lineWidth = 1.4; g.stroke(p1);
+    g.restore();
+  }
+  for (let i = 0; i < n; i++) {
+    g.save(); g.rotate(i*2*PI/n + PI/n); g.globalAlpha = .95; g.fillStyle = cols[0]; g.fill(p2); g.restore();
+  }
+  const cc = r*.27;
+  const gr = g.createRadialGradient(-cc*.16, -cc*.2, 0, -cc*.16, -cc*.2, cc*1.3);
+  gr.addColorStop(0, '#FFC533'); gr.addColorStop(1, '#E88A00');
+  g.fillStyle = gr; g.beginPath(); g.arc(0, 0, cc, 0, 2*PI); g.fill();
+  for (let k = 0; k < 30; k++) {
+    const rr = r*.24*Math.sqrt(k/30), a = k*2.4;
+    g.globalAlpha = .55; g.fillStyle = '#B86A00';
+    g.beginPath(); g.arc(rr*Math.cos(a), rr*Math.sin(a), r*.018, 0, 2*PI); g.fill();
+  }
+  g.globalAlpha = 1;
+}
+function buildSprites() {
+  flowerSprites = FL.map(([kind, x, y, r, rot, tone]) => {
+    const R = r*1.08;
+    const sp = makeSprite(R, g => kind === 's' ? drawSunflower(g, r) : drawDaisy(g, r, tone));
+    return sp;
+  });
+  mimSprites = MIM.map(([cx, cy, n, sp], j) => makeSprite(sp + 20, g => {
+    for (const b of MIM_BALLS[j]) {
+      g.fillStyle = b.col; g.beginPath(); g.arc(b.x, b.y, b.r, 0, 2*PI); g.fill();
+      g.globalAlpha = .7; g.fillStyle = '#FFF3A0';
+      g.beginPath(); g.arc(b.x - b.r*.3, b.y - b.r*.3, b.r*.4, 0, 2*PI); g.fill(); g.globalAlpha = 1;
+    }
+  }));
+}
+
+/* ---------------------------------------------------------- code editor scene */
+const CODE = [
+  '# 21 de septiembre',
+  'from flores import amarillas',
+  '',
+  'hoy = "21 de septiembre"',
+  '',
+  'if hoy == "21 de septiembre":',
+  '    ramo = amarillas.girasoles()',
+  '    ramo.florecer()',
+  '    print("Feliz día de las")',
+  '    print("flores amarillas")',
+];
+const KW = new Set(['from', 'import', 'if']);
+const C_DEF = '#CDD6F4', C_COM = '#6C7086', C_STR = '#A6E3A1', C_KW = '#CBA6F7', C_FN = '#89B4FA', C_OP = '#89DCEB';
+function tokenize(line) {
+  const re = /(#.*$)|("[^"]*")|([A-Za-z_][A-Za-z_0-9]*)|(\s+)|(==|=|\(|\)|:|\.)/g;
+  const out = []; let m;
+  while ((m = re.exec(line))) {
+    const txt = m[0]; let col = C_DEF;
+    if (m[1]) col = C_COM;
+    else if (m[2]) col = C_STR;
+    else if (m[3]) {
+      const nxt = line.charAt(m.index + txt.length);
+      if (KW.has(txt)) col = C_KW; else if (txt === 'print' || nxt === '(') col = C_FN;
+    } else if (m[4]) continue; else col = C_OP;
+    out.push({ st: m.index, txt, col });
+  }
+  return out;
+}
+const TOKENS = CODE.map(tokenize);
+
+const T0 = 0.5;
+const times = []; let tt = T0;
+CODE.forEach((line, li) => {
+  const row = [];
+  for (let ci = 0; ci < line.length; ci++) { tt += 0.011 + 0.008*(((ci*7 + li*3) % 5)/5); row.push(tt); }
+  times.push(row); tt += 0.12;
+});
+const T_CODE_END = tt, T_PANEL = T_CODE_END + 0.35;
+const CMD = '$ python flores.py';
+const T_CMD0 = T_PANEL + 0.3, T_OUT1 = T_CMD0 + CMD.length*0.035 + 0.5, T_OUT2 = T_OUT1 + 0.35;
+const T_TRANS = T_OUT2 + 0.9, TRANS_D = 0.8, TB0 = T_TRANS + 0.3;
+
+const MONO = 'ui-monospace, "SF Mono", Menlo, "DejaVu Sans Mono", Consolas, monospace';
+const FS = 38, CX0 = 175, CY0 = 285, LH = 62;
+
+const P_WIN = new Path2D('M75,105 H1005 A30,30 0 0 1 1035,135 V1225 A30,30 0 0 1 1005,1255 H75 A30,30 0 0 1 45,1225 V135 A30,30 0 0 1 75,105 Z');
+const P_BAR = new Path2D('M45,135 a30,30 0 0 1 30,-30 h930 a30,30 0 0 1 30,30 v45 h-990 z');
+const P_TERM = new Path2D('M93,935 H987 A18,18 0 0 1 1005,953 V1202 A18,18 0 0 1 987,1220 H93 A18,18 0 0 1 75,1202 V953 A18,18 0 0 1 93,935 Z');
+
+function drawEditor(t, wipeY) {
+  const S = Math.min(CW/1080, CH/1350);
+  const tx = (CW - 1080*S)/2, ty = (CH - 1350*S)/2 + wipeY;
+  // background
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const bg = ctx.createRadialGradient(CW*.5, wipeY + CH*.3, 0, CW*.5, wipeY + CH*.3, Math.max(CW, CH)*.85);
+  bg.addColorStop(0, '#232338'); bg.addColorStop(1, '#0C0C14');
+  ctx.fillStyle = bg; ctx.fillRect(0, wipeY, CW, CH + 2);
+  ctx.setTransform(DPR*S, 0, 0, DPR*S, DPR*tx, DPR*ty);
+  // window
+  ctx.save(); ctx.translate(0, 14); ctx.globalAlpha = .35; ctx.fillStyle = '#000'; ctx.fill(P_WIN); ctx.restore();
+  ctx.fillStyle = '#1E1E2E'; ctx.fill(P_WIN);
+  ctx.fillStyle = '#181825'; ctx.fill(P_BAR);
+  ['#F38BA8', '#F9E2AF', '#A6E3A1'].forEach((c, i) => { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(95 + i*40, 150, 13, 0, 2*PI); ctx.fill(); });
+  ctx.textBaseline = 'alphabetic';
+  ctx.font = `30px ${MONO}`; ctx.textAlign = 'center'; ctx.fillStyle = '#A6ADC8'; ctx.fillText('flores.py', 540, 161);
+  const chw = (ctx.font = `${FS}px ${MONO}`, ctx.measureText('0').width);
+  // code
+  let curLine = 0, curCol = 0;
+  for (let li = 0; li < CODE.length; li++) {
+    const y = CY0 + li*LH;
+    ctx.font = `30px ${MONO}`; ctx.textAlign = 'right'; ctx.fillStyle = '#45475A'; ctx.fillText(String(li + 1), 120, y);
+    let shown = 0; for (const x of times[li]) if (x <= t) shown++;
+    if (shown > 0 || (li === 0 && t >= T0)) { curLine = li; curCol = shown; }
+    ctx.textAlign = 'left';
+    for (const tk of TOKENS[li]) {
+      if (tk.st >= shown) break;
+      const part = tk.txt.slice(0, shown - tk.st);
+      ctx.font = (tk.col === C_COM ? 'italic ' : '') + `${FS}px ${MONO}`;
+      ctx.fillStyle = tk.col; ctx.fillText(part, CX0 + tk.st*chw, y);
+    }
+  }
+  const typingDone = t >= T_CODE_END;
+  if (t >= T0 && t < T_PANEL && (!typingDone || Math.floor(t*2) % 2 === 0)) {
+    ctx.fillStyle = '#F5E0DC'; ctx.fillRect(CX0 + curCol*chw, CY0 + curLine*LH - 34, 3.5, 46);
+  }
+  // terminal
+  if (t >= T_PANEL) {
+    const a = e_out((t - T_PANEL)/0.4);
+    ctx.save(); ctx.globalAlpha = a; ctx.translate(0, (1 - a)*40);
+    ctx.fillStyle = '#11111B'; ctx.fill(P_TERM);
+    ctx.font = `24px ${MONO}`; ctx.fillStyle = '#6C7086'; ctx.textAlign = 'left';
+    if ('letterSpacing' in ctx) ctx.letterSpacing = '3px';
+    ctx.fillText('TERMINAL', 105, 985);
+    if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+    ctx.font = `${FS}px ${MONO}`;
+    if (t >= T_CMD0) {
+      const n = Math.floor(clamp((t - T_CMD0)/0.035, 0, CMD.length));
+      ctx.fillStyle = '#A6E3A1'; ctx.fillText(CMD.slice(0, n), 105, 1055);
+      if (t < T_OUT1 && Math.floor(t*3) % 2 === 0) { ctx.fillStyle = '#F5E0DC'; ctx.fillRect(105 + n*chw, 1022, 3.5, 44); }
+    }
+    if (t >= T_OUT1) { ctx.fillStyle = '#CDD6F4'; ctx.fillText('Feliz día de las', 105, 1120); }
+    if (t >= T_OUT2) { ctx.fillStyle = '#F9E2AF'; ctx.fillText('flores amarillas', 105, 1182); }
+    ctx.restore();
+  }
+}
+
+/* ---------------------------------------------------------- bouquet scene */
+const VX = 60, VY = 40, VW = 960, VH = 1310;
+
+function drawLeaf(x, y, L, w, ang, k, fill) {
+  if (k <= 0.01) return;
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang*PI/180); ctx.scale(k, k);
+  ctx.fillStyle = fill; ctx.fill(leafPath(L, w));
+  ctx.globalAlpha = .6; ctx.strokeStyle = '#3F6B26'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -L*.92); ctx.stroke();
+  ctx.restore();
+}
+function partialQuad(p0, p1, p2, p, dx) {
+  const q1 = [lerp(p0[0], p1[0], p), lerp(p0[1], p1[1], p)];
+  const m1 = [lerp(p1[0], p2[0], p), lerp(p1[1], p2[1], p)];
+  const e = [lerp(q1[0], m1[0], p), lerp(q1[1], m1[1], p)];
+  ctx.beginPath(); ctx.moveTo(p0[0] + dx, p0[1]); ctx.quadraticCurveTo(q1[0] + dx, q1[1], e[0] + dx, e[1]);
+}
+function drawPaper(alpha, dy) {
+  ctx.save(); ctx.globalAlpha = alpha; ctx.translate(0, dy);
+  ctx.fillStyle = T.shadow; ctx.beginPath(); ctx.ellipse(GX, 1235, 230, 26, 0, 0, 2*PI); ctx.fill();
+  let g = ctx.createLinearGradient(788, 760, 292, 1222); g.addColorStop(0, '#EBD9AE'); g.addColorStop(1, '#D9C08A');
+  ctx.fillStyle = g; ctx.fill(new Path2D('M292,795 Q540,760 788,795 L578,1205 Q540,1222 502,1205 Z'));
+  g = ctx.createLinearGradient(262, 782, 540, 1215); g.addColorStop(0, '#FFFDF5'); g.addColorStop(1, '#F1E6C8');
+  ctx.fillStyle = g; ctx.fill(new Path2D('M262,782 Q380,850 540,1215 L502,1205 Z'));
+  ctx.fillStyle = '#F7EBCB'; ctx.fill(new Path2D('M818,782 Q700,850 540,1215 L578,1205 Z'));
+  ctx.strokeStyle = '#D9C08A'; ctx.lineWidth = 2;
+  ctx.globalAlpha = alpha*.8;
+  ctx.stroke(new Path2D('M262,782 Q380,850 540,1215')); ctx.stroke(new Path2D('M818,782 Q700,850 540,1215'));
+  ctx.globalAlpha = alpha*.55;
+  ctx.stroke(new Path2D('M400,820 Q520,1000 532,1200')); ctx.stroke(new Path2D('M680,820 Q560,1000 548,1200'));
+  ctx.restore();
+}
+function drawBow(k) {
+  if (k <= 0.01) return;
+  ctx.save(); ctx.translate(GX, 942); ctx.scale(k, k); ctx.translate(-GX, -942);
+  const g = ctx.createLinearGradient(422, 0, 658, 0);
+  g.addColorStop(0, '#6E9A45'); g.addColorStop(.5, '#86B15A'); g.addColorStop(1, '#5E8A38');
+  ctx.fillStyle = g; ctx.fill(new Path2D('M422,905 Q540,935 658,905 L652,945 Q540,975 428,945 Z'));
+  ctx.fillStyle = '#7BA84F'; ctx.fill(new Path2D('M540,935 C470,880 390,905 420,965 C440,1000 500,965 540,945 Z'));
+  ctx.fillStyle = '#6E9A45'; ctx.fill(new Path2D('M540,935 C610,880 690,905 660,965 C640,1000 580,965 540,945 Z'));
+  ctx.fillStyle = '#6E9A45'; ctx.fill(new Path2D('M534,945 C500,1010 470,1060 445,1105 L485,1100 L520,960 Z'));
+  ctx.fillStyle = '#7BA84F'; ctx.fill(new Path2D('M546,945 C580,1010 610,1060 635,1105 L595,1100 L560,960 Z'));
+  ctx.fillStyle = '#5E8A38'; ctx.beginPath(); ctx.ellipse(540, 942, 30, 24, 0, 0, 2*PI); ctx.fill();
+  ctx.globalAlpha = .7; ctx.fillStyle = '#9CC673'; ctx.beginPath(); ctx.ellipse(534, 936, 12, 8, 0, 0, 2*PI); ctx.fill();
+  ctx.restore();
+}
+const STAR = new Path2D('M0,-1 Q0,0 1,0 Q0,0 0,1 Q0,0 -1,0 Q0,0 0,-1 Z');
+
+function drawBouquet(tb, clock) {
+  const S = Math.min(CW/VW, CH/VH);
+  const tx = (CW - VW*S)/2 - VX*S, ty = (CH - VH*S)/2 - VY*S;
+  ctx.setTransform(DPR*S, 0, 0, DPR*S, DPR*tx, DPR*ty);
+  const ramp = clamp((tb - 3.4)/1.5);
+  const th = 1.3*Math.sin(2*PI*tb/4.6)*ramp;
+
+  ctx.save(); ctx.translate(0, -70);
+  ctx.save(); ctx.translate(GX, GY); ctx.rotate(th*PI/180); ctx.translate(-GX, -GY);
+  // back leaves
+  BACK.forEach(([L, w, a], i) => drawLeaf(GX, GY - 60, L, w, a, e_back((tb - 0.06*i)/0.9), BACK_COL[i]));
+  // stems
+  ctx.lineCap = 'round';
+  STEMS.forEach((s, i) => {
+    const p = e_io((tb - START[i])/0.85); if (p <= 0.001) return;
+    partialQuad(s.p0, s.p1, s.p2, p, 0); ctx.strokeStyle = '#4E7A2F'; ctx.lineWidth = 11; ctx.stroke();
+    partialQuad(s.p0, s.p1, s.p2, p, -3); ctx.globalAlpha = .7; ctx.strokeStyle = '#7FAE55'; ctx.lineWidth = 3; ctx.stroke(); ctx.globalAlpha = 1;
+  });
+  // tuck leaves
+  TUCKS.forEach(([x, y, L, w, a], i) => drawLeaf(x, y, L, w, a, e_back((tb - 0.9 - 0.08*i)/0.7), '#6F9F48'));
+  // mimosa
+  MIM.forEach(([cx, cy], j) => {
+    const t0 = 1.2 + 0.1*j, p = e_io((tb - t0)/0.7);
+    if (p > 0.001) {
+      partialQuad([GX, GY - 40], [(cx + GX)/2, (cy + GY)/2], [cx, cy], p, 0);
+      ctx.strokeStyle = '#5E8C3A'; ctx.lineWidth = 6; ctx.stroke();
+    }
+    const k = e_back((tb - t0 - 0.55)/0.5);
+    if (k > 0.01) {
+      const sw = 3*Math.sin(2*PI*tb/3.2 + j)*ramp, sp = mimSprites[j];
+      ctx.save(); ctx.translate(cx, cy); ctx.rotate(sw*PI/180); ctx.scale(k, k);
+      ctx.drawImage(sp.c, -sp.u/2, -sp.u/2, sp.u, sp.u); ctx.restore();
+    }
+  });
+  // flowers
+  FL.forEach(([kind, x, y, r, rot], i) => {
+    const k = e_back((tb - START[i] - 0.65)/0.65); if (k <= 0.01) return;
+    const wob = 3*Math.sin(2*PI*tb/3.4 + i)*ramp;
+    const spin = (1 - e_out((tb - START[i] - 0.65)/0.9))*-40;
+    const sp = flowerSprites[i];
+    ctx.save(); ctx.translate(x, y); ctx.rotate((rot + wob + spin)*PI/180); ctx.scale(k, k);
+    ctx.drawImage(sp.c, -sp.u/2, -sp.u/2, sp.u, sp.u); ctx.restore();
+  });
+  ctx.restore(); // sway
+  // paper + bow
+  const pa = e_out((tb - 2.3)/0.9);
+  if (pa > 0.001) drawPaper(pa, (1 - pa)*240);
+  drawBow(e_back((tb - 3.0)/0.6));
+  ctx.restore(); // -70
+
+  // finale: falling petals + sparkles (over the whole visible area)
+  const fin = tb - 4.4;
+  if (fin > 0) {
+    const fa = clamp(fin/1.0);
+    const xmin = -tx/S, xmax = (CW - tx)/S, ymin = -ty/S, ymax = (CH - ty)/S;
+    const span = (ymax - ymin) + 160;
+    const pp = petal(30, 15);
+    for (const q of PET) {
+      const y0 = q.v0*span, yy = (((y0 + q.v*fin*1.6) % span) + span) % span + ymin - 80;
+      const xx = lerp(xmin, xmax, q.u) + q.dr*Math.sin(fin*1.3 + q.ph);
+      ctx.save(); ctx.translate(xx, yy); ctx.rotate((q.rs*fin + q.ph*20)*PI/180); ctx.scale(q.sc*1.25, q.sc*1.25);
+      ctx.globalAlpha = .9*fa; ctx.fillStyle = '#FFD62E'; ctx.fill(pp);
+      ctx.strokeStyle = '#E8A800'; ctx.lineWidth = 1.5; ctx.globalAlpha = .55*fa; ctx.stroke(pp);
+      ctx.restore();
+    }
+    for (const [x, y, sz, ph] of SPK) {
+      const tw = .5 + .5*Math.sin(fin*3.2 + ph*3); if (tw <= 0.05) continue;
+      ctx.save(); ctx.translate(x, y - 70); const sc = sz*tw*fa; ctx.scale(sc, sc);
+      ctx.globalAlpha = .55 + .4*tw; ctx.fillStyle = T.spark; ctx.fill(STAR); ctx.restore();
+    }
+  }
+  drawCaption(tb);
+}
+
+const CAP = ['Feliz día de las', 'flores amarillas'], CAP_Y = [1252, 1322];
+const CAP_START = 3.9, CAP_FADE_AT = 10.6, CAP_FADE_D = 1.2;
+function drawCaption(tb) {
+  const ct = tb - CAP_START; if (ct <= 0) return;
+  const fo = (tb - CAP_FADE_AT)/CAP_FADE_D; if (fo >= 1) return;
+  const fade = fo > 0 ? 1 - e_io(fo) : 1;
+  const total = CAP[0].length + CAP[1].length, nAll = Math.floor(ct*20), done = nAll >= total;
+  ctx.save(); ctx.globalAlpha = fade; ctx.fillStyle = T.cap; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  let used = 0, cx = null, cy = null;
+  for (let li = 0; li < 2; li++) {
+    const line = CAP[li], n = Math.max(0, Math.min(line.length, nAll - used)); used += line.length;
+    ctx.font = `italic ${li ? 600 : 500} 66px Lora, Georgia, "Times New Roman", serif`;
+    const full = ctx.measureText(line).width, x = GX - full/2;
+    if (n > 0) { ctx.fillText(line.slice(0, n), x, CAP_Y[li]); cx = x + ctx.measureText(line.slice(0, n)).width + 5; cy = CAP_Y[li]; }
+    else if (cx === null && li === 0) { cx = x; cy = CAP_Y[0]; }
+  }
+  if (cx !== null && fo <= 0 && (!done || Math.floor(ct*2) % 2 === 0)) {
+    ctx.fillStyle = '#B8860B'; ctx.fillRect(cx, cy - 50, 4, 60);
+  }
+  ctx.restore();
+}
+
+/* ---------------------------------------------------------- main loop */
+let startMs = null, offset = 0, frames = 0;
+function render(clock) {
+  if (frames++ % 45 === 0) readTheme();
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.globalAlpha = 1; ctx.lineCap = 'butt';
+  if (clock >= T_TRANS) drawBouquet(Math.max(0, clock - TB0), clock);
+  if (clock < T_TRANS + TRANS_D) {
+    const e = e_io((clock - T_TRANS)/TRANS_D);
+    drawEditor(clock, -e*(CH + 60));
+  }
+}
+function frame(now) {
+  if (startMs === null) startMs = now;
+  render((now - startMs)/1000 + offset);
+  requestAnimationFrame(frame);
+}
+function resize() {
+  const r = stage.getBoundingClientRect();
+  CW = Math.max(1, r.width); CH = Math.max(1, r.height);
+  DPR = Math.min(window.devicePixelRatio || 1, 2.5);
+  cv.width = Math.round(CW*DPR); cv.height = Math.round(CH*DPR);
+  cv.style.width = CW + 'px'; cv.style.height = CH + 'px';
+  SPR = Math.min(3, Math.min(CW/VW, CH/VH)*DPR*1.15);
+  buildSprites();
+}
+let rzT = null;
+function onResize() { clearTimeout(rzT); rzT = setTimeout(resize, 120); }
+
+/* tap: skip the code intro, or replay the bloom */
+document.addEventListener('pointerdown', () => {
+  const now = performance.now(), cur = (now - (startMs === null ? now : startMs))/1000 + offset;
+  const target = cur < T_TRANS ? T_TRANS : TB0;
+  offset = target - (now - (startMs === null ? now : startMs))/1000;
+});
+
+readTheme(); resize();
+window.addEventListener('resize', onResize);
+if (window.matchMedia) { try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readTheme); } catch (e) {} }
+if (document.fonts && document.fonts.load) {
+  document.fonts.load('italic 500 60px Lora').catch(() => {});
+  document.fonts.load('italic 600 60px Lora').catch(() => {});
+}
+window.__frame = frame;
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
